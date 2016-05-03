@@ -5373,7 +5373,7 @@ struct Stat4Accum {
   int nCol;                 /* Number of columns in index + pk/rowid */
   int nKeyCol;              /* Number of index columns w/o the pk/rowid */
   int mxSample;             /* Maximum number of samples to accumulate */
-  Stat4Sample current;      /* Current row as a Stat4Sample */
+  Stat4Sample currentSample;      /* Current row as a Stat4Sample */
   u32 iPrn;                 /* Pseudo-random number used for sampling */
   Stat4Sample *aBest;       /* Array of nCol best samples */
   int iMin;                 /* Index in a[] of entry with minimum score */
@@ -5451,7 +5451,7 @@ static void stat4Destructor(void *pOld){
   int i;
   for(i=0; i<p->nCol; i++) sampleClear(p->db, p->aBest+i);
   for(i=0; i<p->mxSample; i++) sampleClear(p->db, p->a+i);
-  sampleClear(p->db, &p->current);
+  sampleClear(p->db, &p->currentSample);
 #endif
   sqlite3DbFree(p->db, p);
 }
@@ -5524,8 +5524,8 @@ static void statInit(
   p->nRow = 0;
   p->nCol = nCol;
   p->nKeyCol = nKeyCol;
-  p->current.anDLt = (tRowcnt*)&p[1];
-  p->current.anEq = &p->current.anDLt[nColUp];
+  p->currentSample.anDLt = (tRowcnt*)&p[1];
+  p->currentSample.anEq = &p->currentSample.anDLt[nColUp];
 
 #ifdef SQLITE_ENABLE_STAT3_OR_STAT4
   {
@@ -5535,11 +5535,11 @@ static void statInit(
     p->iGet = -1;
     p->mxSample = mxSample;
     p->nPSample = (tRowcnt)(sqlite3_value_int64(argv[2])/(mxSample/3+1) + 1);
-    p->current.anLt = &p->current.anEq[nColUp];
+    p->currentSample.anLt = &p->currentSample.anEq[nColUp];
     p->iPrn = 0x689e962d*(u32)nCol ^ 0xd0944565*(u32)sqlite3_value_int(argv[2]);
   
     /* Set up the Stat4Accum.a[] and aBest[] arrays */
-    p->a = (struct Stat4Sample*)&p->current.anLt[nColUp];
+    p->a = (struct Stat4Sample*)&p->currentSample.anLt[nColUp];
     p->aBest = &p->a[mxSample];
     pSpace = (u8*)(&p->a[mxSample+nCol]);
     for(i=0; i<(mxSample+nCol); i++){
@@ -5721,7 +5721,7 @@ static void sampleInsert(Stat4Accum *p, Stat4Sample *pNew, int nEqZero){
 
 /*
 ** Field iChng of the index being scanned has changed. So at this point
-** p->current contains a sample that reflects the previous row of the
+** p->currentSample contains a sample that reflects the previous row of the
 ** index. The value of anEq[iChng] and subsequent anEq[] elements are
 ** correct at this point.
 */
@@ -5733,7 +5733,7 @@ static void samplePushPrevious(Stat4Accum *p, int iChng){
   ** into IndexSample.a[] at this point.  */
   for(i=(p->nCol-2); i>=iChng; i--){
     Stat4Sample *pBest = &p->aBest[i];
-    pBest->anEq[i] = p->current.anEq[i];
+    pBest->anEq[i] = p->currentSample.anEq[i];
     if( p->nSample<p->mxSample || sampleIsBetter(p, pBest, &p->a[p->iMin]) ){
       sampleInsert(p, pBest, i);
     }
@@ -5743,28 +5743,28 @@ static void samplePushPrevious(Stat4Accum *p, int iChng){
   for(i=p->nSample-1; i>=0; i--){
     int j;
     for(j=iChng; j<p->nCol; j++){
-      if( p->a[i].anEq[j]==0 ) p->a[i].anEq[j] = p->current.anEq[j];
+      if( p->a[i].anEq[j]==0 ) p->a[i].anEq[j] = p->currentSample.anEq[j];
     }
   }
 #endif
 
 #if defined(SQLITE_ENABLE_STAT3) && !defined(SQLITE_ENABLE_STAT4)
   if( iChng==0 ){
-    tRowcnt nLt = p->current.anLt[0];
-    tRowcnt nEq = p->current.anEq[0];
+    tRowcnt nLt = p->currentSample.anLt[0];
+    tRowcnt nEq = p->currentSample.anEq[0];
 
     /* Check if this is to be a periodic sample. If so, add it. */
     if( (nLt/p->nPSample)!=(nLt+nEq)/p->nPSample ){
-      p->current.isPSample = 1;
-      sampleInsert(p, &p->current, 0);
-      p->current.isPSample = 0;
+      p->currentSample.isPSample = 1;
+      sampleInsert(p, &p->currentSample, 0);
+      p->currentSample.isPSample = 0;
     }else 
 
     /* Or if it is a non-periodic sample. Add it in this case too. */
     if( p->nSample<p->mxSample 
-     || sampleIsBetter(p, &p->current, &p->a[p->iMin]) 
+     || sampleIsBetter(p, &p->currentSample, &p->a[p->iMin]) 
     ){
-      sampleInsert(p, &p->current, 0);
+      sampleInsert(p, &p->currentSample, 0);
     }
   }
 #endif
@@ -5809,7 +5809,7 @@ static void statPush(
 
   if( p->nRow==0 ){
     /* This is the first call to this function. Do initialization. */
-    for(i=0; i<p->nCol; i++) p->current.anEq[i] = 1;
+    for(i=0; i<p->nCol; i++) p->currentSample.anEq[i] = 1;
   }else{
     /* Second and subsequent calls get processed here */
     samplePushPrevious(p, iChng);
@@ -5817,44 +5817,44 @@ static void statPush(
     /* Update anDLt[], anLt[] and anEq[] to reflect the values that apply
     ** to the current row of the index. */
     for(i=0; i<iChng; i++){
-      p->current.anEq[i]++;
+      p->currentSample.anEq[i]++;
     }
     for(i=iChng; i<p->nCol; i++){
-      p->current.anDLt[i]++;
+      p->currentSample.anDLt[i]++;
 #ifdef SQLITE_ENABLE_STAT3_OR_STAT4
-      p->current.anLt[i] += p->current.anEq[i];
+      p->currentSample.anLt[i] += p->currentSample.anEq[i];
 #endif
-      p->current.anEq[i] = 1;
+      p->currentSample.anEq[i] = 1;
     }
   }
   p->nRow++;
 #ifdef SQLITE_ENABLE_STAT3_OR_STAT4
   if( sqlite3_value_type(argv[2])==SQLITE_INTEGER ){
-    sampleSetRowidInt64(p->db, &p->current, sqlite3_value_int64(argv[2]));
+    sampleSetRowidInt64(p->db, &p->currentSample, sqlite3_value_int64(argv[2]));
   }else{
-    sampleSetRowid(p->db, &p->current, sqlite3_value_bytes(argv[2]),
+    sampleSetRowid(p->db, &p->currentSample, sqlite3_value_bytes(argv[2]),
                                        sqlite3_value_blob(argv[2]));
   }
-  p->current.iHash = p->iPrn = p->iPrn*1103515245 + 12345;
+  p->currentSample.iHash = p->iPrn = p->iPrn*1103515245 + 12345;
 #endif
 
 #ifdef SQLITE_ENABLE_STAT4
   {
-    tRowcnt nLt = p->current.anLt[p->nCol-1];
+    tRowcnt nLt = p->currentSample.anLt[p->nCol-1];
 
     /* Check if this is to be a periodic sample. If so, add it. */
     if( (nLt/p->nPSample)!=(nLt+1)/p->nPSample ){
-      p->current.isPSample = 1;
-      p->current.iCol = 0;
-      sampleInsert(p, &p->current, p->nCol-1);
-      p->current.isPSample = 0;
+      p->currentSample.isPSample = 1;
+      p->currentSample.iCol = 0;
+      sampleInsert(p, &p->currentSample, p->nCol-1);
+      p->currentSample.isPSample = 0;
     }
 
     /* Update the aBest[] array. */
     for(i=0; i<(p->nCol-1); i++){
-      p->current.iCol = i;
-      if( i>=iChng || sampleIsBetterPost(p, &p->current, &p->aBest[i]) ){
-        sampleCopy(p, &p->aBest[i], &p->current);
+      p->currentSample.iCol = i;
+      if( i>=iChng || sampleIsBetterPost(p, &p->currentSample, &p->aBest[i]) ){
+        sampleCopy(p, &p->aBest[i], &p->currentSample);
       }
     }
   }
@@ -5942,11 +5942,11 @@ static void statGet(
     sqlite3_snprintf(24, zRet, "%llu", (u64)p->nRow);
     z = zRet + sqlite3Strlen30(zRet);
     for(i=0; i<p->nKeyCol; i++){
-      u64 nDistinct = p->current.anDLt[i] + 1;
+      u64 nDistinct = p->currentSample.anDLt[i] + 1;
       u64 iVal = (p->nRow + nDistinct - 1) / nDistinct;
       sqlite3_snprintf(24, z, " %llu", iVal);
       z += sqlite3Strlen30(z);
-      assert( p->current.anEq[i] );
+      assert( p->currentSample.anEq[i] );
     }
     assert( z[0]=='\0' && z>zRet );
 

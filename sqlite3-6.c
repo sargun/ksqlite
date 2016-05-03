@@ -18624,7 +18624,10 @@ static int jsonParseAddNode(JsonParse*,u32,u32,const char*);
 ** A macro to hint to the compiler that a function should not be
 ** inlined.
 */
-#if defined(__GNUC__)
+
+#ifdef __KERNEL__
+#  define JSON_NOINLINE  noinline
+#elif defined(__GNUC__)
 #  define JSON_NOINLINE  __attribute__((noinline))
 #elif defined(_MSC_VER) && _MSC_VER>=1310
 #  define JSON_NOINLINE  __declspec(noinline)

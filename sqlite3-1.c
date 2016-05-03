@@ -146,12 +146,12 @@
 #endif
 
 /* What version of GCC is being used.  0 means GCC is not being used */
-
-
-#if defined(__GNUC__) && !defined(GCC_VERSION) 
-# define GCC_VERSION (__GNUC__*1000000+__GNUC_MINOR__*1000+__GNUC_PATCHLEVEL__)
-#else
-# define GCC_VERSION 0
+#ifndef GCC_VERSION
+#	ifdef __GNUC__ 
+#		define GCC_VERSION (__GNUC__*1000000+__GNUC_MINOR__*1000+__GNUC_PATCHLEVEL__)
+#	else
+#		define GCC_VERSION 0
+#	endif
 #endif
 
 /* Needed for various definitions... */
@@ -9216,7 +9216,9 @@ struct fts5_api {
 ** A macro to hint to the compiler that a function should not be
 ** inlined.
 */
-#if defined(__GNUC__)
+#ifdef __KERNEL__
+#  define SQLITE_NOINLINE  noinline
+#elif defined(__GNUC__)
 #  define SQLITE_NOINLINE  __attribute__((noinline))
 #elif defined(_MSC_VER) && _MSC_VER>=1310
 #  define SQLITE_NOINLINE  __declspec(noinline)
@@ -9488,9 +9490,16 @@ SQLITE_PRIVATE   void sqlite3Coverage(int);
 ** in theory, be used by the compiler to generate better code, but
 ** currently they are just comments for human readers.
 */
+	
+	// TODO: Go fix later
+	/*
+#ifndef likely	
 #define likely(X)    (X)
+#endif
+#ifndef unlikely
 #define unlikely(X)  (X)
-
+#endif
+	 * */
 /************** Include hash.h in the middle of sqliteInt.h ******************/
 /************** Begin file hash.h ********************************************/
 /*
@@ -9768,7 +9777,6 @@ SQLITE_PRIVATE void sqlite3HashClear(Hash*);
 //#include <stdio.h>
 //#include <stdlib.h>
 //#include <string.h>
-#define assert(X) BUG_ON(X)
 //#include <assert.h>
 #include <stddef.h>
 
@@ -16744,9 +16752,16 @@ SQLITE_API int SQLITE_STDCALL sqlite3_db_status(
 /* #include "sqliteInt.h" */
 /* #include <stdlib.h> */
 /* #include <assert.h> */
+
+#ifdef __KERNEL__
+#include <linux/time.h>
+#include <linux/timekeeping.h>
+#else
 #include <time.h>
+#endif
 
 #ifndef SQLITE_OMIT_DATETIME_FUNCS
+
 
 
 /*
@@ -17799,6 +17814,7 @@ static void currentTimeFunc(
   int argc,
   sqlite3_value **argv
 ){
+	
   time_t t;
   char *zFormat = (char *)sqlite3_user_data(context);
   sqlite3 *db;
@@ -17806,7 +17822,8 @@ static void currentTimeFunc(
   struct tm *pTm;
   struct tm sNow;
   char zBuf[20];
-
+	
+	/*
   UNUSED_PARAMETER(argc);
   UNUSED_PARAMETER(argv);
 
@@ -17825,6 +17842,10 @@ static void currentTimeFunc(
     strftime(zBuf, 20, zFormat, &sNow);
     sqlite3_result_text(context, zBuf, -1, SQLITE_TRANSIENT);
   }
+	*/
+	// TODO: Fix this?
+	memset(zBuf, 20, '0');
+	sqlite3_result_text(context, zBuf, -1, SQLITE_TRANSIENT);
 }
 #endif
 
@@ -22416,7 +22437,7 @@ SQLITE_PRIVATE int sqlite3MallocSize(void *p){
 SQLITE_PRIVATE int sqlite3DbMallocSize(sqlite3 *db, void *p){
   assert( p!=0 );
   if( db==0 || !isLookaside(db,p) ){
-#if SQLITE_DEBUG
+#ifdef SQLITE_DEBUG
     if( db==0 ){
       assert( sqlite3MemdebugNoType(p, (u8)~MEMTYPE_HEAP) );
       assert( sqlite3MemdebugHasType(p, MEMTYPE_HEAP) );
@@ -22477,7 +22498,7 @@ SQLITE_PRIVATE void sqlite3DbFree(sqlite3 *db, void *p){
     }
     if( isLookaside(db, p) ){
       LookasideSlot *pBuf = (LookasideSlot*)p;
-#if SQLITE_DEBUG
+#ifdef SQLITE_DEBUG
       /* Trash all content in the buffer being freed */
       memset(p, 0xaa, db->lookaside.sz);
 #endif
@@ -27287,3 +27308,93 @@ SQLITE_PRIVATE const char *sqlite3OpcodeName(int i){
 #endif
 
 /************** End of opcodes.c *********************************************/
+
+SQLITE_PRIVATE int sqlite3Atoi64X10000(const char *zNum, i64 *pNum, int length, u8 enc){
+  int incr;
+  u64 u = 0;
+  int neg = 0; /* assume positive */
+  int i;
+	int decimalMark = -1;
+  int c = 0;
+  int nonNum = 0;
+  const char *zStart;
+  const char *zEnd = zNum + length;
+  assert( enc==SQLITE_UTF8 || enc==SQLITE_UTF16LE || enc==SQLITE_UTF16BE );
+  if( enc==SQLITE_UTF8 ){
+    incr = 1;
+  }else{
+    incr = 2;
+    assert( SQLITE_UTF16LE==2 && SQLITE_UTF16BE==3 );
+    for(i=3-enc; i<length && zNum[i]==0; i+=2){}
+    nonNum = i<length;
+    zEnd = zNum+i+enc-3;
+    zNum += (enc&1);
+  }
+  while( zNum<zEnd && sqlite3Isspace(*zNum) ) zNum+=incr;
+  if( zNum<zEnd ){
+    if( *zNum=='-' ){
+      neg = 1;
+      zNum+=incr;
+    }else if( *zNum=='+' ){
+      zNum+=incr;
+    }
+  }
+  zStart = zNum;
+  while( zNum<zEnd && zNum[0]=='0' ){ zNum+=incr; } /* Skip leading zeros. */
+	// All floats are effectively X*10**4
+  for(i=0; &zNum[i]<zEnd && decimalMark < 5; i+=incr){
+		c = zNum[i];
+		if (c>='0' && c<='9') {
+	    u = u*10 + c - '0';
+			if (decimalMark > -1) decimalMark++;
+		} else if (c == '.') {
+			decimalMark++;
+		} else {
+			break;
+		}
+  }
+	switch(decimalMark) {
+		case -1: ;
+		case 0: u = u * 10;
+		case 1: u = u * 10;
+		case 2: u = u * 10;
+		case 3: u = u * 10;
+		default: break;
+	}
+  if( u>LARGEST_INT64 ){
+    *pNum = neg ? SMALLEST_INT64 : LARGEST_INT64;
+  }else if( neg ){
+    *pNum = -(i64)u;
+  }else{
+    *pNum = (i64)u;
+  }
+  testcase( i==18 );
+  testcase( i==19 );
+  testcase( i==20 );
+  if( (c!=0 && &zNum[i]<zEnd) || (i==0 && zStart==zNum)
+       || i>19*incr || nonNum ){
+    /* zNum is empty or contains non-numeric text or is longer
+    ** than 19 digits (thus guaranteeing that it is too large) */
+    return 1;
+  }else if( i<19*incr ){
+    /* Less than 19 digits, so we know that it fits in 64 bits */
+    assert( u<=LARGEST_INT64 );
+    return 0;
+  }else{
+    /* zNum is a 19-digit numbers.  Compare it against 9223372036854775808. */
+    c = compare2pow63(zNum, incr);
+    if( c<0 ){
+      /* zNum is less than 9223372036854775808 so it fits */
+      assert( u<=LARGEST_INT64 );
+      return 0;
+    }else if( c>0 ){
+      /* zNum is greater than 9223372036854775808 so it overflows */
+      return 1;
+    }else{
+      /* zNum is exactly 9223372036854775808.  Fits if negative.  The
+      ** special case 2 overflow if positive */
+      assert( u-1==LARGEST_INT64 );
+      return neg ? 0 : 2;
+    }
+  }
+}

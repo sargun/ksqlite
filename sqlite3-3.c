@@ -15945,8 +15945,10 @@ static int sqlite3IntFloatCompare(i64 i, double r){
   }else{
     i64 y;
     double s;
+		/* WARNING WARNING TO DO BUG BUG BUG
     if( r<-9223372036854775808.0 ) return +1;
     if( r>9223372036854775807.0 ) return -1;
+		 * */
     y = (i64)r;
     if( i<y ) return -1;
     if( i>y ){
@@ -29910,12 +29912,22 @@ static void notValid(
 ** value between 1.0 and 0.0.
 */
 static int exprProbability(Expr *p){
+#if defined(__KERNEL__) && defined(SQLITE_OMIT_FLOATING_POINT)
+	i64 r = -1.0;
+  if( p->op!=TK_FLOAT ) return -1;
+	sqlite3Atoi64X10000(p->u.zToken, &r, sqlite3Strlen30(p->u.zToken), SQLITE_UTF8);
+  sqlite3AtoF(p->u.zToken, &r, sqlite3Strlen30(p->u.zToken), SQLITE_UTF8);
+  assert( r>=0.0 );
+  if( r>10000 ) return -1;
+	return (int)((1024*10000) / r);
+#else
   double r = -1.0;
   if( p->op!=TK_FLOAT ) return -1;
   sqlite3AtoF(p->u.zToken, &r, sqlite3Strlen30(p->u.zToken), SQLITE_UTF8);
   assert( r>=0.0 );
   if( r>1.0 ) return -1;
   return (int)(r*134217728.0);
+#endif
 }
 
 /*
