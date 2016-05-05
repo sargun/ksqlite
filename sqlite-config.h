@@ -4,6 +4,7 @@
 #include <linux/types.h>
 #include <linux/ktime.h>
 
+#define FILE void
 #define SQLITE_OS_OTHER 1
 #define SQLITE_CORE 1
 #define SQLITE_AMALGAMATION 1
@@ -13,7 +14,7 @@
 
 
 #define SQLITE_SMALL_STACKS 1
-#define SQLITE_THREADSAFE 1
+#define SQLITE_THREADSAFE 0
 
 // It could make queries go faster?
 #define SQLITE_ENABLE_STAT3 1
@@ -43,14 +44,14 @@
 // JSON is cool, right?
 #define SQLITE_ENABLE_JSON1 1
 
+
+#define SQLITE_ENABLE_MEMORY_MANAGEMENT 1
 /*
-#define SQLITE_ENABLE_MEMORY_MANAGEMENT 0
 #define SQLITE_ENABLE_MEMSYS3 0
 #define SQLITE_ENABLE_MEMSYS5 0
 #define SQLITE_ENABLE_SQLLOG 0
 #define SQLITE_ENABLE_UNLOCK_NOTIFY 1
 */
-
     
 /* Now we start trimming features */
 #define SQLITE_OMIT_AUTHORIZATION 1
@@ -76,4 +77,6 @@
 
 #define SQLITE_COVERAGE_TEST 0
 
-#define assert(X)
+#define assert(X) 
+
+#define SQLITE_USE_URI 1

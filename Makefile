@@ -1,5 +1,5 @@
 obj-m := ksqlite.o
-ksqlite-objs := sqlite3-all.o kmodsqlite.o	
+ksqlite-objs := sqlite3-all.o kmodsqlite.o test_onemem.o	
 KDIR := /lib/modules/$(shell uname -r)/build
 #KDIR := /home/sargun/linux-4.4.8
 PWD := $(shell pwd)

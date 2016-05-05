@@ -38,13 +38,9 @@
 #include "sqlite3-6.c"
 #include "sqlite3-7.c"
 
-// 1 megabyte
-#define KMALLOC_THRESHOLD 1048576
-
 struct mAllocHeader {
-	s64			size;
-	u8			allocationType;
-	char		pad[7];
+	int			size;
+	int			allocationType;
 }; 
 
 enum {
@@ -53,25 +49,29 @@ enum {
 };
 #define MALLOC_HEADER_SIZE sizeof(struct mAllocHeader)
 void* kernelMemMalloc(int size) {
+	printk("CALLED MALLOC with size: %d\n", size);
 	void *ret = NULL;
 	struct mAllocHeader mhdr;
-	mhdr.size = size + MALLOC_HEADER_SIZE;
+	mhdr.size = size;
 	mhdr.allocationType = KMALLOC;
-	if (mhdr.size < KMALLOC_THRESHOLD) {
-		ret = kmalloc(size, GFP_KERNEL);
-	}
+	ret = kmalloc(size, GFP_KERNEL);
+	printk("Malloc: %p\n", ret);
 	if (ret) goto finish;
 	
 	ret = vmalloc((unsigned long)size);
 	mhdr.allocationType = VMALLOC;
+ 	printk("VMAlloc: %p\n", ret);
 
 	finish:
 	if (ret == NULL) return NULL;
 	
 	memcpy(ret, &mhdr, MALLOC_HEADER_SIZE);
-	return ret + MALLOC_HEADER_SIZE;
+	ret = ret + MALLOC_HEADER_SIZE;
+	printk("Returning: %p\n", ret);
+	return ret;
 }
 void kernelMemFree(void *p) {
+	printk("Freeing: %p\n", p);
 	struct mAllocHeader mhdr;
 	memcpy(&mhdr, p - MALLOC_HEADER_SIZE, MALLOC_HEADER_SIZE);
 	if (mhdr.allocationType == KMALLOC) {
@@ -86,25 +86,34 @@ void* kernelMemRealloc(void *oldAlloc, int newsize) {
 	void *newalloc = kernelMemMalloc(newsize);
 
 	memcpy(&mhdr, oldAlloc - MALLOC_HEADER_SIZE, MALLOC_HEADER_SIZE);	
+	printk("Reallocing(%lld -> %d): %p\n", mhdr.size, newsize, oldAlloc);
+
 	if (!newalloc) { return NULL; }
 	// It's okay, because SQLite actually gives us the beginning of the data sections on both
 	memcpy(newalloc, oldAlloc, MIN(mhdr.size, newsize));
+	
 	kernelMemFree(oldAlloc);
 	return newalloc;
 }
 
 int kernelMemSize(void *p) {
+
 	struct mAllocHeader mhdr;
 	memcpy(&mhdr, p - MALLOC_HEADER_SIZE, MALLOC_HEADER_SIZE);
+	printk("Memsize, returning: %p, %lld\n", p, mhdr.size);
+
 	return mhdr.size;
 }
 
 int kernelMemRoundup(int size) {
+	return size * 8;
 	int r = size % 8;
 	if (r == 0) return size;
 	return (8 - r) + size;
 }
 int kernelMemInit(void *data) {
+	printk("CALLED MemINIT\n");
+
 	return SQLITE_OK;
 }
 int kernelMemShutdown(void *data) {
@@ -201,7 +210,11 @@ int kernelMutexShutdown(void) {
 }
 
 int sqlite3_os_init(void) {
-	printk("Beginning SQLite Initialization process");
+	return 0;
+}
+
+void setup_sqlite3(void) {
+	printk("Beginning SQLite Initialization process\n");
 	static const sqlite3_mutex_methods kernel_mutex_methods = {
 		kernelMutexInit,
 		kernelMutexShutdown,
@@ -213,10 +226,10 @@ int sqlite3_os_init(void) {
 		0,
 		0,
 	};
-	setupSpinlocks();
+	//setupSpinlocks();
 	
-	sqlite3_config(SQLITE_CONFIG_MUTEX, &kernel_mutex_methods);
-		static const sqlite3_mem_methods kernel_mem_methods = {
+	//sqlite3_config(SQLITE_CONFIG_MUTEX, &kernel_mutex_methods);
+	static const sqlite3_mem_methods kernel_mem_methods = {
 		kernelMemMalloc,         /* Memory allocation function */
 		kernelMemFree,          /* Free a prior allocation */
 		kernelMemRealloc,  /* Resize an allocation */
